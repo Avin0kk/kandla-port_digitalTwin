@@ -1,0 +1,175 @@
+<!-- 3D Canvas Container -->
+<div #canvasContainer class="map-container"></div>
+
+<!-- Loading Overlay -->
+@if (loading()) {
+  <div class="loading-screen">
+    <div class="spinner"></div>
+    <div class="loading-text">Constructing Kandla Port 3D Scene...</div>
+  </div>
+}
+
+<!-- Floating Instructions -->
+<div class="instruction-banner">
+  <span class="info-pulse"></span>
+  <span>Left Click to Rotate | Right Click to Pan | Click Object to Inspect</span>
+</div>
+
+<!-- Floating Toggle HUD Button -->
+<button class="btn-toggle-hud" (click)="toggleDashboard()">
+  <span>{{ dashboardVisible() ? '✕ Hide Controls' : '☰ Show Controls' }}</span>
+</button>
+
+<!-- Glassmorphic Dashboard HUD -->
+<div class="dashboard-hud" [class.hidden]="!dashboardVisible()">
+  <!-- Brand & Stats Panel -->
+  <div class="glass-panel">
+    <div class="header-container">
+      <h1 class="main-title">Kandla Port 3D</h1>
+      <p class="subtitle">
+        <span class="live-indicator"></span>
+        Interactive Spatial Engine
+      </p>
+    </div>
+    
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-val">394</div>
+        <div class="metric-label">Buildings</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-val">418</div>
+        <div class="metric-label">Roads</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-val">8</div>
+        <div class="metric-label">Docks & Piers</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-val">2.5M</div>
+        <div class="metric-label">Raw OSM nodes</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Layer Visibility Panel -->
+  <div class="glass-panel">
+    <h2 class="section-title">Visual Layers</h2>
+    <div class="layer-list">
+      <div class="layer-item">
+        <div class="layer-info">
+          <span class="layer-dot" style="background-color: #1d4ed8;"></span>
+          <span class="layer-label">Water Channel</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" [checked]="layers.water" (change)="toggleLayer('water')">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="layer-item">
+        <div class="layer-info">
+          <span class="layer-dot" style="background-color: #64748b;"></span>
+          <span class="layer-label">Docks & Piers</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" [checked]="layers.piers" (change)="toggleLayer('piers')">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="layer-item">
+        <div class="layer-info">
+          <span class="layer-dot" style="background-color: #8b5a2b;"></span>
+          <span class="layer-label">Port Buildings</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" [checked]="layers.buildings" (change)="toggleLayer('buildings')">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+      <div class="layer-item">
+        <div class="layer-info">
+          <span class="layer-dot" style="background-color: #cbd5e1;"></span>
+          <span class="layer-label">Roads & Rails</span>
+        </div>
+        <label class="switch">
+          <input type="checkbox" [checked]="layers.roads" (change)="toggleLayer('roads')">
+          <span class="slider"></span>
+        </label>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Camera Presets Panel -->
+  <div class="glass-panel">
+    <h2 class="section-title">Camera Views</h2>
+    <div class="camera-button-group">
+      <button class="btn-ctrl" [class.active]="currentView() === 'docks'" (click)="setCameraView('docks')">
+        <span style="font-size: 1.1rem;">⚓</span>
+        <span>Main Docks</span>
+      </button>
+      <button class="btn-ctrl" [class.active]="currentView() === 'overview'" (click)="setCameraView('overview')">
+        <span style="font-size: 1.1rem;">🌍</span>
+        <span>Bird's Eye</span>
+      </button>
+      <button class="btn-ctrl" [class.active]="autoRotate()" (click)="toggleAutoRotate()">
+        <span style="font-size: 1.1rem;">🔄</span>
+        <span>{{ autoRotate() ? 'Stop Orbit' : 'Auto Orbit' }}</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Interactive Inspector Panel -->
+  @if (selectedObject()) {
+    <div class="glass-panel inspector-panel">
+      <div class="inspector-header">
+        <h2 class="inspector-title">Feature Inspector</h2>
+        <button class="btn-close" (click)="clearSelection()">×</button>
+      </div>
+      <div class="inspector-body">
+        <table class="tag-table">
+          <tbody>
+            @for (item of selectedObjectProperties() | keyvalue; track item.key) {
+              <tr class="tag-row">
+                <td class="tag-key">{{ item.key }}</td>
+                <td class="tag-value">{{ item.value }}</td>
+              </tr>
+            }
+          </tbody>
+        </table>
+      </div>
+    </div>
+  }
+</div>
+
+<!-- Color Legend (Bottom Right) -->
+<div class="glass-panel legend-panel">
+  <div class="legend-list">
+    <div class="legend-item">
+      <span class="legend-color" style="background: #1b281f; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 0 6px rgba(27, 40, 31, 0.4);"></span>
+      <span>Green-Grey Terrain</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-color" style="background: #1d4ed8; box-shadow: 0 0 6px rgba(29, 78, 216, 0.4);"></span>
+      <span>Blue Water Channel</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-color" style="background: #2e3b4e; border: 1px solid #64748b;"></span>
+      <span>Shipping Berths</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-color" style="background: #8b5a2b; border: 1px solid #4a2e1b; box-shadow: 0 0 6px rgba(139, 90, 43, 0.4);"></span>
+      <span>Brown Port Buildings</span>
+    </div>
+    <div class="legend-item">
+      <span class="legend-color" style="background: #cbd5e1; box-shadow: 0 0 6px rgba(203, 213, 225, 0.4);"></span>
+      <span>Light Grey Roads</span>
+    </div>
+  </div>
+</div>
+
+<!-- Dynamic Hover Tooltip -->
+<div #tooltip class="canvas-tooltip">Tooltip</div>
