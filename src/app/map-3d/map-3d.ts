@@ -80,6 +80,10 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
   private originalMaterials = new Map<string, THREE.Material | THREE.Material[]>();
   private highlightedObject: THREE.Object3D | null = null;
 
+  // Live Port twin states
+  private pierCounter = 0;
+  private pulsingBeacons: THREE.Mesh[] = [];
+
   ngOnInit() {
     // Initial hooks if needed
   }
@@ -106,6 +110,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       this.renderer.dispose();
     }
     this.controls.dispose();
+    this.pulsingBeacons = [];
   }
 
   // --- 1. INITIALIZE THREE.JS ---
@@ -597,13 +602,66 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
         mesh.receiveShadow = true;
         mesh.castShadow = true;
 
+        // Dynamic vessel mooring and stand status allocation
+        this.pierCounter++;
+        let status = 'Available';
+        let statusColor = 0x10b981; // Green
+        let shipName = '';
+        let carrier = '';
+        let cargo = '';
+        let statusText = 'Available for Mooring';
+        let isOccupied = false;
+        let isDelayed = false;
+
+        // Custom Demo Data Fields for Arrival/Departure times & Next ship
+        let arrivalTime = 'N/A';
+        let departureTime = 'N/A';
+        let nextShip = 'MV Ocean Rider';
+        let nextArrival = '2026-05-27 18:30 (ETA)';
+        let nextDeparture = '2026-05-29 06:00';
+
+        if (this.pierCounter % 3 === 1) {
+          status = 'Occupied';
+          statusColor = 0xef4444; // Red
+          shipName = this.pierCounter === 1 ? 'MV Kandla Express' : 'MV Gujarat Monarch';
+          carrier = this.pierCounter === 1 ? 'Maersk Line' : 'COSCO Shipping';
+          cargo = this.pierCounter === 1 ? 'Containers (Dry)' : 'Bulk Iron Ore';
+          statusText = 'Occupied (On Schedule)';
+          isOccupied = true;
+          
+          arrivalTime = this.pierCounter === 1 ? '2026-05-27 05:15 (ATA)' : '2026-05-26 23:45 (ATA)';
+          departureTime = this.pierCounter === 1 ? '2026-05-28 22:00 (ETD)' : '2026-05-28 10:30 (ETD)';
+          nextShip = this.pierCounter === 1 ? 'MT Liquid Gold' : 'MV Desert Storm';
+          nextArrival = this.pierCounter === 1 ? '2026-05-29 02:30 (ETA)' : '2026-05-28 18:00 (ETA)';
+          nextDeparture = this.pierCounter === 1 ? '2026-05-30 14:00' : '2026-05-30 02:00';
+        } else if (this.pierCounter % 3 === 2) {
+          status = 'Delayed';
+          statusColor = 0xf59e0b; // Orange
+          shipName = this.pierCounter === 2 ? 'SS Deendayal' : 'MT Narmada';
+          carrier = this.pierCounter === 2 ? 'MSC Cargo' : 'Adani Shipping';
+          cargo = this.pierCounter === 2 ? 'Crude Oil (Liquid)' : 'Liquefied Natural Gas';
+          statusText = 'Occupied (Delayed 3.5h)';
+          isOccupied = true;
+          isDelayed = true;
+
+          arrivalTime = this.pierCounter === 2 ? '2026-05-27 11:30 (ATA - Delayed)' : '2026-05-27 14:15 (ATA - Delayed)';
+          departureTime = this.pierCounter === 2 ? '2026-05-29 14:00 (ETD - Rescheduled)' : '2026-05-29 18:45 (ETD - Rescheduled)';
+          nextShip = this.pierCounter === 2 ? 'MV Desert Storm' : 'MV Kandla Express';
+          nextArrival = this.pierCounter === 2 ? '2026-05-29 18:00 (ETA - Awaiting Berth)' : '2026-05-30 01:15 (ETA - Awaiting Berth)';
+          nextDeparture = this.pierCounter === 2 ? '2026-05-31 06:00' : '2026-05-31 12:30';
+        }
+
         mesh.userData = {
           properties: {
-            name: props.name || 'Cargo Dock / Wharf',
-            type: 'Shipping Berth',
-            man_made: props.man_made || 'pier',
-            operator: props.operator || 'Deendayal Port Authority',
-            ...props
+            'Berth Name': props.name || `Cargo Berth Stand #${this.pierCounter}`,
+            'Type': 'Shipping Berth',
+            'Status': statusText,
+            'Current Vessel': isOccupied ? shipName : 'None (Available)',
+            'Actual Arrival': isOccupied ? arrivalTime : 'N/A',
+            'Estimated Departure': isOccupied ? departureTime : 'N/A',
+            'Next Scheduled Vessel': nextShip,
+            'Next Vessel ETA': nextArrival,
+            'Operator': props.operator || 'Deendayal Port Authority'
           },
           originalMaterial: mat
         };
@@ -616,6 +674,100 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
 
         this.piersGroup.add(mesh);
         this.interactiveObjects.push(mesh);
+
+        // Compute pier bounding box center for placing stands and status lights
+        geo.computeBoundingBox();
+        const bbox = geo.boundingBox!;
+        const center = new THREE.Vector3();
+        bbox.getCenter(center);
+
+        // Render the rectangular Box of the Ship Stand (mooring boundary in water, offset to the East)
+        const standWidth = 40;
+        const standLength = 160;
+        const standGeo = new THREE.BoxGeometry(standWidth, standLength, 1);
+        const standMat = new THREE.MeshStandardMaterial({
+          color: statusColor,
+          roughness: 0.5,
+          metalness: 0.1,
+          transparent: true,
+          opacity: 0.15,
+          emissive: statusColor,
+          emissiveIntensity: 0.15
+        });
+        const standMesh = new THREE.Mesh(standGeo, standMat);
+        standMesh.position.set(center.x + 55, center.y, -1.9); // offset East into the water channel
+        standMesh.receiveShadow = true;
+        this.piersGroup.add(standMesh);
+
+        // Add neon outline to the stand boundary box
+        const standEdges = new THREE.EdgesGeometry(standGeo);
+        const standLineMat = new THREE.LineBasicMaterial({ color: statusColor, transparent: true, opacity: 0.5 });
+        const standOutline = new THREE.LineSegments(standEdges, standLineMat);
+        standMesh.add(standOutline);
+
+        // Signify stand status in interactive tooltip
+        standMesh.userData = {
+          properties: {
+            'Stand Name': `Berth Stand #${this.pierCounter}`,
+            'Type': 'Vessel Mooring Stand',
+            'Mooring Status': statusText,
+            'Current Vessel': isOccupied ? shipName : 'None (Available)',
+            'Actual Arrival': isOccupied ? arrivalTime : 'N/A',
+            'Estimated Departure': isOccupied ? departureTime : 'N/A',
+            'Next Ship Scheduled': nextShip,
+            'Next Ship ETA': nextArrival
+          }
+        };
+        this.interactiveObjects.push(standMesh);
+
+        // Place status indicator beacon pole on the pier
+        const beaconGroup = new THREE.Group();
+        beaconGroup.position.set(center.x, center.y, 1.0); // sitting on top of the pier Z level
+
+        const beaconPoleGeo = new THREE.CylinderGeometry(0.8, 0.8, 8, 8);
+        const beaconPoleMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.8 });
+        const beaconPole = new THREE.Mesh(beaconPoleGeo, beaconPoleMat);
+        beaconPole.rotation.x = Math.PI / 2;
+        beaconPole.position.z = 4;
+        beaconGroup.add(beaconPole);
+
+        const beaconBulbGeo = new THREE.SphereGeometry(2, 16, 16);
+        const beaconBulbMat = new THREE.MeshBasicMaterial({ color: statusColor });
+        const beaconBulb = new THREE.Mesh(beaconBulbGeo, beaconBulbMat);
+        beaconBulb.position.z = 9;
+        beaconGroup.add(beaconBulb);
+
+        this.piersGroup.add(beaconGroup);
+
+        if (isDelayed) {
+          this.pulsingBeacons.push(beaconBulb);
+        }
+
+        // If the stand is occupied, spawn the cargo ship
+        if (isOccupied) {
+          const hullColor = isDelayed ? 0x5a1e1e : 0x1e293b; // red-tinted hull for delayed, slate-blue for on-time
+          const containerColor = isDelayed ? 0xd97706 : 0x059669;
+          const shipMesh = this.createCargoShipMesh(hullColor, containerColor);
+          
+          shipMesh.position.set(center.x + 55, center.y, -1.0); // sit inside the stand box in the water
+          
+          shipMesh.userData = {
+            properties: {
+              'Vessel Name': shipName,
+              'Carrier Company': carrier,
+              'Cargo Type': cargo,
+              'Berth Location': props.name || `Berth Stand #${this.pierCounter}`,
+              'Mooring Status': statusText,
+              'Actual Arrival': arrivalTime,
+              'Estimated Departure': departureTime,
+              'Next Port Call': 'Mundra Port (INMUN)',
+              'Operating Agent': 'Kandla Marine Services Ltd'
+            }
+          };
+
+          this.shipsGroup.add(shipMesh);
+          this.interactiveObjects.push(shipMesh);
+        }
       } catch (err) {}
     });
   }
@@ -1075,6 +1227,12 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       this.controls.target.z = 2.0;
     }
     this.controls.update();
+
+    // Pulse delayed stand beacons dynamically
+    this.pulsingBeacons.forEach(bulb => {
+      const scale = 1.0 + Math.sin(elapsedTime * 4.0) * 0.15;
+      bulb.scale.set(scale, scale, scale);
+    });
 
     // 2. Animate Water Ripples & Texture Offset
     if (this.waterMaterial) {
