@@ -34,6 +34,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
   // Angular UI Signals
   loading = signal<boolean>(true);
   dashboardVisible = signal<boolean>(true);
+  isDarkMode = signal<boolean>(true); // Dynamic Light/Dark Mode
   layers: ViewportLayers = {
     water: true,
     piers: true,
@@ -75,6 +76,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
   private animatedShips: Array<{ mesh: THREE.Group; speed: number; direction: number; rangeY: [number, number] }> = [];
   private waterMaterial!: THREE.MeshStandardMaterial;
   private roadMaterial!: THREE.MeshStandardMaterial;
+  private landMesh!: THREE.Mesh; // Store reference to update land texture dynamically
 
   // Restore States for Raycaster Hover/Select
   private originalMaterials = new Map<string, THREE.Material | THREE.Material[]>();
@@ -117,11 +119,14 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
   private initThree() {
     const container = this.canvasContainer.nativeElement;
     
+    const isDark = this.isDarkMode();
+    const skyColor = isDark ? 0x0a0f24 : 0xe0f2fe;
+
     // Scene creation
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xe0f2fe); // Gorgeous bright daylight sky blue
+    this.scene.background = new THREE.Color(skyColor);
     // Fog for depth
-    this.scene.fog = new THREE.FogExp2(0xe0f2fe, 0.00018); // Bright daylight atmosphere fog
+    this.scene.fog = new THREE.FogExp2(skyColor, 0.00018);
 
     // Camera creation
     this.camera = new THREE.PerspectiveCamera(
@@ -137,8 +142,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
     this.renderer.setSize(container.clientWidth, container.clientHeight);
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.enabled = false; // Disable shadow maps to completely stop light flickering and maximize FPS
     container.appendChild(this.renderer.domElement);
 
     // Set camera up-vector to Z-axis (height) so OrbitControls rotates upright relative to our ground XY plane
@@ -170,31 +174,22 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   private setupLights() {
-    // Warm daylight/studio ambient light to show colors accurately
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+    const isDark = this.isDarkMode();
+
+    // Warm daylight or tech studio ambient light
+    const ambientLight = new THREE.AmbientLight(isDark ? 0x3b82f6 : 0xffffff, isDark ? 0.45 : 1.1);
     this.scene.add(ambientLight);
 
-    // Main Directional Light (Sun light) - neutral white to avoid cyan/green tints
-    const dirLight = new THREE.DirectionalLight(0xfffbeb, 1.2);
+    // Main Directional Light (Sun light)
+    const dirLight = new THREE.DirectionalLight(isDark ? 0x8ab4f8 : 0xfffbeb, isDark ? 0.65 : 1.2);
     dirLight.position.set(500, 800, 600);
-    dirLight.castShadow = true;
-    dirLight.shadow.mapSize.width = 2048;
-    dirLight.shadow.mapSize.height = 2048;
-    dirLight.shadow.camera.near = 10;
-    dirLight.shadow.camera.far = 3000;
-    
-    const d = 1000;
-    dirLight.shadow.camera.left = -d;
-    dirLight.shadow.camera.right = d;
-    dirLight.shadow.camera.top = d;
-    dirLight.shadow.camera.bottom = -d;
-    dirLight.shadow.bias = -0.0005;
-    
+    dirLight.castShadow = false; // Disable directional light shadow maps to stop camera movement flickering and double FPS
     this.scene.add(dirLight);
 
     // Soft fill light from opposite angle to soften shadows
-    const fillLight = new THREE.DirectionalLight(0xffffff, 0.35);
+    const fillLight = new THREE.DirectionalLight(isDark ? 0x1e293b : 0xffffff, isDark ? 0.2 : 0.35);
     fillLight.position.set(-800, -500, 200);
+    fillLight.castShadow = false;
     this.scene.add(fillLight);
 
     // Add a few animated glowing beacon point lights near the harbor coordinates
@@ -235,7 +230,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
     // 1. Giant Water Plane covering the entire background sea/creek channel
     const waterPlaneGeo = new THREE.PlaneGeometry(80000, 80000);
     const waterPlane = new THREE.Mesh(waterPlaneGeo, this.waterMaterial);
-    waterPlane.position.set(0, 0, -2.0); // Place at water level Z = -2.0
+    waterPlane.position.set(0, 0, -10.0); // Place at base water level Z = -10.0 to prevent Z-fighting with linear waterways
     waterPlane.receiveShadow = false; // Disable shadow receiving on water to prevent shadow acne flickering
     this.scene.add(waterPlane);
   }
@@ -405,9 +400,10 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       landShape.lineTo(-40000, -40000);
       landShape.closePath();
 
-      const grassTexture = this.createGrassTexture();
+      const isDark = this.isDarkMode();
+      const landTexture = isDark ? this.createDarkLandTexture() : this.createLightLandTexture();
       const landMat = new THREE.MeshStandardMaterial({
-        map: grassTexture,
+        map: landTexture,
         roughness: 0.95,
         metalness: 0.05,
         flatShading: true
@@ -415,21 +411,24 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       const landGeo = new THREE.ShapeGeometry(landShape);
       const landMesh = new THREE.Mesh(landGeo, landMat);
       landMesh.position.z = 0.0; // Place at land level
-      landMesh.receiveShadow = true;
+      landMesh.receiveShadow = false; // Disabled shadow receiving on land to completely prevent shadow acne/flickering
+      this.landMesh = landMesh; // Store reference to update land texture dynamically
       this.scene.add(landMesh);
     } else {
       // Fallback to simple land plane if no coastline found
+      const isDark = this.isDarkMode();
       const landPlaneGeo = new THREE.PlaneGeometry(40000, 40000);
-      const grassTexture = this.createGrassTexture();
+      const landTexture = isDark ? this.createDarkLandTexture() : this.createLightLandTexture();
       const landMat = new THREE.MeshStandardMaterial({
-        map: grassTexture,
+        map: landTexture,
         roughness: 0.95,
         metalness: 0.05,
         flatShading: true
       });
       const landMesh = new THREE.Mesh(landPlaneGeo, landMat);
       landMesh.position.z = 0.0; // Place at land level Z = 0
-      landMesh.receiveShadow = true;
+      landMesh.receiveShadow = false; // Disabled shadow receiving on land to completely prevent shadow acne/flickering
+      this.landMesh = landMesh; // Store reference to update land texture dynamically
       this.scene.add(landMesh);
     }
 
@@ -454,25 +453,31 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
 
     // Adjust camera to look nicely at the center of the rendered objects
     this.setCameraView('docks');
+    
+    // Apply initial light/dark theme to all loaded meshes
+    this.applyTheme();
   }
 
   // --- 4. PRE-DEFINE STYLED MATERIALS (THEME SYSTEM) ---
   private setupThemeMaterials() {
-    // Create animated water procedural texture
-    const waterTexture = this.createWaterTexture();
+    const isDark = this.isDarkMode();
+    
+    // Create animated water procedural texture based on initial theme
+    const waterTexture = isDark ? this.createDarkWaterTexture() : this.createLightWaterTexture();
 
-    // Water: gorgeous deep sky/marine blue with wave texture
+    // Water material
     this.waterMaterial = new THREE.MeshStandardMaterial({
       map: waterTexture,
-      roughness: 0.45,
-      metalness: 0.6,
+      color: isDark ? 0x0f172a : 0xa5d3f7,
+      roughness: isDark ? 0.3 : 0.45,
+      metalness: isDark ? 0.8 : 0.6,
       transparent: true,
-      opacity: 0.88,
+      opacity: isDark ? 0.95 : 0.88,
       flatShading: false
     });
 
-    // Create road procedural texture
-    const roadTexture = this.createRoadTexture();
+    // Create road procedural texture based on initial theme
+    const roadTexture = isDark ? this.createDarkRoadTexture() : this.createLightRoadTexture();
     this.roadMaterial = new THREE.MeshStandardMaterial({
       map: roadTexture,
       roughness: 0.8,
@@ -480,9 +485,9 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       flatShading: false
     });
 
-    // Docks/Piers: concrete medium grey
+    // Docks/Piers Concrete material (updated in applyTheme)
     const pierMat = new THREE.MeshStandardMaterial({
-      color: 0x4b5563, // Concrete grey
+      color: isDark ? 0x1e293b : 0xcbd5e1,
       roughness: 0.8,
       metalness: 0.15
     });
@@ -581,26 +586,27 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       });
     }
 
-    // Extrude piers slightly above water level
+    // Extrude piers deep into the water and above land level Z
     const extrudeSettings = {
       steps: 1,
-      depth: 5, // 5 meters tall berths
+      depth: 14.5, // 14.5 meters tall berths (reaches from Z = -12.0 to 2.5)
       bevelEnabled: false
     };
 
     shapes.forEach(shape => {
       try {
         const geo = new THREE.ExtrudeGeometry(shape, extrudeSettings);
+        const isDark = this.isDarkMode();
         const mat = new THREE.MeshStandardMaterial({
-          color: 0x27354a,
+          color: isDark ? 0x1e293b : 0xcbd5e1, // Concrete color based on initial theme
           roughness: 0.85,
           metalness: 0.25
         });
         
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.z = -4.0; // Place at sea level base (sits in the water at -2.0 and reaches above land)
-        mesh.receiveShadow = true;
-        mesh.castShadow = true;
+        mesh.position.z = -12.0; // Place deep at sea level base
+        mesh.receiveShadow = false; // Disable shadow maps to stop camera movement flickering
+        mesh.castShadow = false;
 
         // Dynamic vessel mooring and stand status allocation
         this.pierCounter++;
@@ -695,8 +701,8 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
           emissiveIntensity: 0.15
         });
         const standMesh = new THREE.Mesh(standGeo, standMat);
-        standMesh.position.set(center.x + 55, center.y, -1.9); // offset East into the water channel
-        standMesh.receiveShadow = true;
+        standMesh.position.set(center.x + 55, center.y, -9.9); // offset East into the water channel and placed slightly above the water plane
+        standMesh.receiveShadow = false; // Disable to prevent flickering
         this.piersGroup.add(standMesh);
 
         // Add neon outline to the stand boundary box
@@ -722,7 +728,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
 
         // Place status indicator beacon pole on the pier
         const beaconGroup = new THREE.Group();
-        beaconGroup.position.set(center.x, center.y, 1.0); // sitting on top of the pier Z level
+        beaconGroup.position.set(center.x, center.y, 2.5); // sitting exactly on top of the pier top Z level (2.5)
 
         const beaconPoleGeo = new THREE.CylinderGeometry(0.8, 0.8, 8, 8);
         const beaconPoleMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.8 });
@@ -749,7 +755,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
           const containerColor = isDelayed ? 0xd97706 : 0x059669;
           const shipMesh = this.createCargoShipMesh(hullColor, containerColor);
           
-          shipMesh.position.set(center.x + 55, center.y, -1.0); // sit inside the stand box in the water
+          shipMesh.position.set(center.x + 55, center.y, -8.0); // sit inside the stand box in the water (Z = -8.0)
           
           shipMesh.userData = {
             properties: {
@@ -810,8 +816,8 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
           const left = new THREE.Vector2().copy(p).addScaledVector(normal, width / 2);
           const right = new THREE.Vector2().copy(p).addScaledVector(normal, -width / 2);
 
-          vertices.push(left.x, left.y, -1.8);
-          vertices.push(right.x, right.y, -1.8);
+          vertices.push(left.x, left.y, -8.0); // Raised slightly above base sea plane at -10.0
+          vertices.push(right.x, right.y, -8.0);
           
           uvs.push(0, i / points.length);
           uvs.push(1, i / points.length);
@@ -834,7 +840,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
         geo.computeVertexNormals();
 
         const mesh = new THREE.Mesh(geo, this.waterMaterial);
-        mesh.receiveShadow = true;
+        mesh.receiveShadow = false; // Disable to prevent shadow flickering
         this.waterGroup.add(mesh);
       });
       return;
@@ -855,8 +861,8 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       try {
         const geo = new THREE.ShapeGeometry(shape);
         const mesh = new THREE.Mesh(geo, this.waterMaterial);
-        mesh.position.z = -1.8; // Place slightly above base water level
-        mesh.receiveShadow = true;
+        mesh.position.z = -8.0; // Place slightly above base water level Z = -10.0 to prevent Z-fighting
+        mesh.receiveShadow = false; // Disable to prevent shadow flickering
         
         mesh.userData = {
           properties: {
@@ -898,8 +904,8 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       try {
         const geo = new THREE.ShapeGeometry(shape);
         const mesh = new THREE.Mesh(geo, mat);
-        mesh.position.z = 0.05; // Slightly above ground (0.0)
-        mesh.receiveShadow = true;
+        mesh.position.z = 0.2; // Slightly above ground (0.0) but below roads (1.0) to prevent Z-fighting
+        mesh.receiveShadow = false; // Disable to prevent shadow flickering
         
         mesh.userData = {
           properties: {
@@ -927,9 +933,10 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       });
     }
 
-    const grassTexture = this.createGrassTexture();
+    const isDark = this.isDarkMode();
+    const landTexture = isDark ? this.createDarkLandTexture() : this.createLightLandTexture();
     const mat = new THREE.MeshStandardMaterial({
-      map: grassTexture,
+      map: landTexture,
       roughness: 0.95,
       metalness: 0.05,
       flatShading: true
@@ -940,7 +947,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
         const geo = new THREE.ShapeGeometry(shape);
         const mesh = new THREE.Mesh(geo, mat);
         mesh.position.z = 0.0; // Place at land level (above water at -8.0)
-        mesh.receiveShadow = true;
+        mesh.receiveShadow = false; // Disable to completely prevent shadow acne/flickering
         
         mesh.userData = {
           properties: {
@@ -1013,8 +1020,10 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
         const right = new THREE.Vector2().copy(p).addScaledVector(normal, -width / 2);
 
         // Z-coordinate slightly above terrain at 0.6 so they overlap cleanly without z-fighting
-        vertices.push(left.x, left.y, 0.6);
-        vertices.push(right.x, right.y, 0.6);
+        // Z-coordinate slightly above terrain at 1.0 (roads) or 1.05 (railways) so they overlap cleanly without z-fighting
+        const roadZ = props.railway ? 1.05 : 1.0;
+        vertices.push(left.x, left.y, roadZ);
+        vertices.push(right.x, right.y, roadZ);
 
         // Map UVs: U = 0 (left) and 1 (right). V repeats every 30 units of distance
         const v = distances[i] / 30.0;
@@ -1040,7 +1049,7 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
       geo.computeVertexNormals();
 
       const mesh = new THREE.Mesh(geo, this.roadMaterial);
-      mesh.receiveShadow = true;
+      mesh.receiveShadow = false; // Disable to completely prevent shadow acne/flickering
       
       mesh.userData = {
         properties: {
@@ -1418,52 +1427,69 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
   }
 
   // --- 11. PROCEDURAL TEXTURES GENERATORS ---
-  private createGrassTexture(): THREE.Texture {
+  private createLightLandTexture(): THREE.Texture {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 256;
     const ctx = canvas.getContext('2d')!;
-    
-    // Moss Green-Grey Base
-    ctx.fillStyle = '#1b281f';
+    ctx.fillStyle = '#f4f1ea'; // Beautiful pale warm cream matching the reference image exactly
     ctx.fillRect(0, 0, 256, 256);
     
-    // Add organic noise details to simulate grass/moss
-    for (let i = 0; i < 9000; i++) {
+    // Elegant light texture noise
+    for (let i = 0; i < 4000; i++) {
       const x = Math.random() * 256;
       const y = Math.random() * 256;
-      const size = Math.random() * 1.5 + 0.5;
-      const tint = Math.floor(Math.random() * 30) - 15;
-      
-      ctx.fillStyle = `rgb(${27 + tint/2}, ${40 + tint}, ${31 + tint/2})`;
+      const size = Math.random() * 1.2 + 0.4;
+      ctx.fillStyle = 'rgba(230, 226, 218, 0.5)';
       ctx.fillRect(x, y, size, size);
     }
     
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(60, 60); // Repeat across our ground terrain plane
+    texture.repeat.set(60, 60);
     return texture;
   }
 
-  private createWaterTexture(): THREE.Texture {
+  private createDarkLandTexture(): THREE.Texture {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 256;
     const ctx = canvas.getContext('2d')!;
-    
-    // Vibrant royal blue base
-    ctx.fillStyle = '#1d4ed8';
+    ctx.fillStyle = '#0a0f24'; // Gorgeous deep space navy blue ground
     ctx.fillRect(0, 0, 256, 256);
     
-    // Shimmering light blue wave overlays
-    ctx.strokeStyle = 'rgba(96, 165, 250, 0.45)'; // bright wave stroke
-    ctx.lineWidth = 2.0;
+    // Tech-style dark dots
+    for (let i = 0; i < 5000; i++) {
+      const x = Math.random() * 256;
+      const y = Math.random() * 256;
+      const size = Math.random() * 1.5;
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.4)';
+      ctx.fillRect(x, y, size, size);
+    }
     
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(60, 60);
+    return texture;
+  }
+
+  private createLightWaterTexture(): THREE.Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#a5d3f7'; // Soft sky blue sea matching the screenshot exactly
+    ctx.fillRect(0, 0, 256, 256);
+    
+    // Soft white wave overlays
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.4)';
+    ctx.lineWidth = 1.5;
     for (let y = 10; y < 250; y += 20) {
       ctx.beginPath();
-      for (let x = 0; x <= 256; x += 12) {
-        const offset = Math.sin((x / 25) + (y / 15)) * 4.5;
+      for (let x = 0; x <= 256; x += 16) {
+        const offset = Math.sin((x / 20) + (y / 15)) * 3.0;
         if (x === 0) ctx.moveTo(x, y + offset);
         else ctx.lineTo(x, y + offset);
       }
@@ -1477,30 +1503,171 @@ export class Map3dComponent implements OnInit, AfterViewInit, OnDestroy {
     return texture;
   }
 
-  private createRoadTexture(): THREE.Texture {
+  private createDarkWaterTexture(): THREE.Texture {
     const canvas = document.createElement('canvas');
-    canvas.width = 128;
+    canvas.width = 256;
     canvas.height = 256;
     const ctx = canvas.getContext('2d')!;
+    ctx.fillStyle = '#0f172a'; // Deep dark navy sea
+    ctx.fillRect(0, 0, 256, 256);
     
-    // Charcoal black asphalt base
-    ctx.fillStyle = '#111111';
-    ctx.fillRect(0, 0, 128, 256);
+    // Shimmering blue wave active ripples
+    ctx.strokeStyle = 'rgba(59, 130, 246, 0.3)';
+    ctx.lineWidth = 2.0;
+    for (let y = 8; y < 250; y += 16) {
+      ctx.beginPath();
+      for (let x = 0; x <= 256; x += 12) {
+        const offset = Math.sin((x / 25) + (y / 12)) * 4.0;
+        if (x === 0) ctx.moveTo(x, y + offset);
+        else ctx.lineTo(x, y + offset);
+      }
+      ctx.stroke();
+    }
     
-    // Left and Right solid white shoulder borders
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    texture.repeat.set(12, 12);
+    return texture;
+  }
+
+  private createLightRoadTexture(): THREE.Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Solid, high-contrast steel blue road matching screenshot
+    ctx.fillStyle = '#4b6f96'; 
+    ctx.fillRect(0, 0, 64, 128);
+    
+    // Elegant darker borders
+    ctx.fillStyle = '#375270';
+    ctx.fillRect(0, 0, 2, 128);
+    ctx.fillRect(62, 0, 2, 128);
+    
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.ClampToEdgeWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    return texture;
+  }
+
+  private createDarkRoadTexture(): THREE.Texture {
+    const canvas = document.createElement('canvas');
+    canvas.width = 64;
+    canvas.height = 128;
+    const ctx = canvas.getContext('2d')!;
+    
+    // Tech-style charcoal black base
+    ctx.fillStyle = '#111520'; 
+    ctx.fillRect(0, 0, 64, 128);
+    
+    // Glowing neon cyan borders for extreme dark mode visibility
+    ctx.fillStyle = '#00f0ff'; 
+    ctx.fillRect(0, 0, 3, 128);
+    ctx.fillRect(61, 0, 3, 128);
+    
+    // Bright white dashed center lane lines
     ctx.fillStyle = '#ffffff';
-    ctx.fillRect(6, 0, 4, 256);   // Left border
-    ctx.fillRect(118, 0, 4, 256); // Right border
-    
-    // Center dashed white lane divider (producing black and white strips)
-    ctx.fillStyle = '#ffffff';
-    for (let y = 16; y < 256; y += 64) {
-      ctx.fillRect(61, y, 6, 32);
+    for (let y = 8; y < 128; y += 32) {
+      ctx.fillRect(30, y, 4, 16);
     }
     
     const texture = new THREE.CanvasTexture(canvas);
     texture.wrapS = THREE.ClampToEdgeWrapping;
     texture.wrapT = THREE.RepeatWrapping;
     return texture;
+  }
+
+  // --- 12. DYNAMIC LIGHT/DARK THEME TOGGLE ENGINE ---
+  toggleTheme() {
+    this.isDarkMode.set(!this.isDarkMode());
+    this.applyTheme();
+  }
+
+  private applyTheme() {
+    const isDark = this.isDarkMode();
+    
+    // 1. Update sky background & fog colors
+    const skyColor = isDark ? 0x0a0f24 : 0xe0f2fe;
+    this.scene.background = new THREE.Color(skyColor);
+    if (this.scene.fog instanceof THREE.FogExp2) {
+      this.scene.fog.color.setHex(skyColor);
+    }
+    
+    // 2. Traversal update for all standard lighting intensities & hues
+    this.scene.traverse((child) => {
+      if (child instanceof THREE.AmbientLight) {
+        child.color.setHex(isDark ? 0x3b82f6 : 0xffffff); // tech blue-tinted in dark mode, pure white daylight in light mode
+        child.intensity = isDark ? 0.45 : 1.1;
+      }
+      if (child instanceof THREE.DirectionalLight) {
+        // Position checked to discriminate between main sun and opposite fill light
+        if (child.position.y > 0) { // Main Sun
+          child.color.setHex(isDark ? 0x8ab4f8 : 0xfffbeb); // warm-cream in light, steel-blue in dark mode
+          child.intensity = isDark ? 0.65 : 1.2;
+        } else { // Soft fill
+          child.color.setHex(isDark ? 0x1e293b : 0xffffff);
+          child.intensity = isDark ? 0.2 : 0.35;
+        }
+      }
+    });
+    
+    // 3. Dynamic land mesh mapping
+    if (this.landMesh) {
+      const landTexture = isDark ? this.createDarkLandTexture() : this.createLightLandTexture();
+      if (this.landMesh.material instanceof THREE.MeshStandardMaterial) {
+        this.landMesh.material.map = landTexture;
+        this.landMesh.material.color.setHex(0xffffff); // reset color filters
+        this.landMesh.material.needsUpdate = true;
+      }
+    }
+    
+    // 4. Dynamic water material properties
+    if (this.waterMaterial) {
+      const waterTexture = isDark ? this.createDarkWaterTexture() : this.createLightWaterTexture();
+      this.waterMaterial.map = waterTexture;
+      this.waterMaterial.color.setHex(isDark ? 0x0f172a : 0xa5d3f7); // Deep sea in dark mode, pastel blue sky reflection in light mode
+      this.waterMaterial.roughness = isDark ? 0.3 : 0.45;
+      this.waterMaterial.metalness = isDark ? 0.8 : 0.6;
+      this.waterMaterial.opacity = isDark ? 0.95 : 0.88;
+      this.waterMaterial.needsUpdate = true;
+    }
+    
+    // 5. Dynamic road material properties
+    if (this.roadMaterial) {
+      const roadTexture = isDark ? this.createDarkRoadTexture() : this.createLightRoadTexture();
+      this.roadMaterial.map = roadTexture;
+      this.roadMaterial.needsUpdate = true;
+    }
+    
+    // 6. Docks/Berths concrete styling
+    this.piersGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh && child.userData['properties'] && child.userData['properties']['Type'] === 'Shipping Berth') {
+        const mat = child.material as THREE.MeshStandardMaterial;
+        mat.color.setHex(isDark ? 0x1e293b : 0xcbd5e1); // Concrete colors
+        mat.needsUpdate = true;
+      }
+    });
+    
+    // 7. Architectural buildings styling
+    this.buildingsGroup.traverse((child) => {
+      if (child instanceof THREE.Mesh) {
+        const mat = child.material as THREE.MeshStandardMaterial;
+        mat.color.setHex(isDark ? 0x1e293b : 0xd1c7bd); // Dark blocks vs soft architectural beige
+        mat.emissive.setHex(isDark ? 0x0c4a6e : 0x000000); // Glowing office windows in dark mode, disabled in light
+        mat.emissiveIntensity = isDark ? 0.35 : 0.0;
+        mat.needsUpdate = true;
+        
+        // Update structural wireframe outlines
+        child.children.forEach(c => {
+          if (c instanceof THREE.LineSegments && c.material instanceof THREE.LineBasicMaterial) {
+            c.material.color.setHex(isDark ? 0x00f0ff : 0x8a7b6e); // Neon cyan outlines in dark, soft brown in light mode
+            c.material.opacity = isDark ? 0.7 : 0.3;
+            c.material.needsUpdate = true;
+          }
+        });
+      }
+    });
   }
 }

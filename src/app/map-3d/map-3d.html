@@ -10,18 +10,23 @@
 }
 
 <!-- Floating Instructions -->
-<div class="instruction-banner">
+<div class="instruction-banner" [class.light-theme]="!isDarkMode()">
   <span class="info-pulse"></span>
   <span>Left Click to Rotate | Right Click to Pan | Click Object to Inspect</span>
 </div>
 
-<!-- Floating Toggle HUD Button -->
-<button class="btn-toggle-hud" (click)="toggleDashboard()">
-  <span>{{ dashboardVisible() ? '✕ Hide Controls' : '☰ Show Controls' }}</span>
-</button>
+<!-- Floating Top Left Controls Group -->
+<div class="top-controls-left" [class.light-theme]="!isDarkMode()">
+  <button class="btn-toggle-hud" (click)="toggleDashboard()">
+    <span>{{ dashboardVisible() ? '✕ Hide Controls' : '☰ Show Controls' }}</span>
+  </button>
+  <button class="btn-toggle-theme" (click)="toggleTheme()">
+    <span>{{ isDarkMode() ? '☀️ Light Mode' : '🌙 Dark Mode' }}</span>
+  </button>
+</div>
 
 <!-- Glassmorphic Dashboard HUD -->
-<div class="dashboard-hud" [class.hidden]="!dashboardVisible()">
+<div class="dashboard-hud" [class.hidden]="!dashboardVisible()" [class.light-theme]="!isDarkMode()">
   <!-- Brand & Stats Panel -->
   <div class="glass-panel">
     <div class="header-container">
@@ -146,27 +151,27 @@
 </div>
 
 <!-- Color Legend (Bottom Right) -->
-<div class="glass-panel legend-panel">
+<div class="glass-panel legend-panel" [class.light-theme]="!isDarkMode()">
   <div class="legend-list">
     <div class="legend-item">
-      <span class="legend-color" style="background: #1b281f; border: 1px solid rgba(255,255,255,0.05); box-shadow: 0 0 6px rgba(27, 40, 31, 0.4);"></span>
-      <span>Green-Grey Terrain</span>
+      <span class="legend-color" [style.background]="isDarkMode() ? '#0a0f24' : '#f4f1ea'" style="border: 1px solid rgba(255,255,255,0.08);"></span>
+      <span>{{ isDarkMode() ? 'Dark Blue Ground' : 'Warm Beige Ground' }}</span>
     </div>
     <div class="legend-item">
-      <span class="legend-color" style="background: #1d4ed8; box-shadow: 0 0 6px rgba(29, 78, 216, 0.4);"></span>
-      <span>Blue Water Channel</span>
+      <span class="legend-color" [style.background]="isDarkMode() ? '#1d4ed8' : '#a5d3f7'" style="border: 1px solid rgba(255,255,255,0.08);"></span>
+      <span>{{ isDarkMode() ? 'Deep Navy Sea' : 'Soft Sky Blue Water' }}</span>
     </div>
     <div class="legend-item">
-      <span class="legend-color" style="background: #2e3b4e; border: 1px solid #64748b;"></span>
-      <span>Shipping Berths</span>
+      <span class="legend-color" [style.background]="isDarkMode() ? '#1e293b' : '#cbd5e1'" style="border: 1px solid rgba(255,255,255,0.08);"></span>
+      <span>Berths & Docks</span>
     </div>
     <div class="legend-item">
-      <span class="legend-color" style="background: #8b5a2b; border: 1px solid #4a2e1b; box-shadow: 0 0 6px rgba(139, 90, 43, 0.4);"></span>
-      <span>Brown Port Buildings</span>
+      <span class="legend-color" [style.background]="isDarkMode() ? '#1e293b' : '#d1c7bd'" style="border: 1px solid rgba(255,255,255,0.08);"></span>
+      <span>Port Buildings</span>
     </div>
     <div class="legend-item">
-      <span class="legend-color" style="background: #cbd5e1; box-shadow: 0 0 6px rgba(203, 213, 225, 0.4);"></span>
-      <span>Light Grey Roads</span>
+      <span class="legend-color" [style.background]="isDarkMode() ? '#00f0ff' : '#4b6f96'" style="border: 1px solid rgba(255,255,255,0.08);"></span>
+      <span>{{ isDarkMode() ? 'Neon Cyan Roads' : 'Slate Blue Roads' }}</span>
     </div>
   </div>
 </div>
